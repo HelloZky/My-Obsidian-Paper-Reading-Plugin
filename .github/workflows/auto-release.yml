@@ -1,0 +1,74 @@
+name: Auto Release by Manifest Version
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'manifest.json' # 只有 manifest.json 变化时才尝试发布（节省资源）
+
+permissions:
+  contents: write # 创建 Release 需要写权限
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 读取 manifest.json 里的版本号
+      - name: Get version from manifest.json
+        id: version
+        run: |
+          VERSION=$(jq -r .version manifest.json)
+          echo "Detected version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # 3. 检查该版本是否已发布过
+      - name: Check if release exists
+        id: check_tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            echo "Version $VERSION already exists. Skipping release."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version $VERSION is new. Proceeding with release."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 4. 安装依赖并构建（仅当版本是新的时）
+      - name: Setup Node.js
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build plugin
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          npm install
+          npm run build
+
+      # 5. 创建 Release 并上传产物（内置分区数据已 inline 进 main.js）
+      - name: Create Release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            main.js
+            manifest.json
+            styles.css
+            versions.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
