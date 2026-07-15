@@ -6,7 +6,7 @@ import { RankingService } from "./rankings";
 import { DEFAULT_SETTINGS, PaperVaultSettings, PaperVaultSettingTab } from "./settings";
 import { PaperDetailView } from "./views/PaperDetailView";
 import { PaperHomeView } from "./views/PaperHomeView";
-import { PaperListView } from "./views/PaperListView";
+import { PaperListView, PaperListViewMode } from "./views/PaperListView";
 
 export default class PaperVaultPlugin extends Plugin {
   settings: PaperVaultSettings;
@@ -144,11 +144,11 @@ export default class PaperVaultPlugin extends Plugin {
   }
 
   /** 打开论文库并套用给定筛选条件（供主页卡片跳转使用）。 */
-  async openListWithFilter(partial: Partial<FilterState>): Promise<void> {
+  async openListWithFilter(partial: Partial<FilterState>, viewMode?: PaperListViewMode): Promise<void> {
     await this.activateView();
     const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_PAPER_LIST)[0];
     if (leaf?.view instanceof PaperListView) {
-      leaf.view.applyFilter(partial);
+      leaf.view.applyFilter(partial, viewMode);
     }
   }
 

@@ -2,6 +2,7 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import type PaperVaultPlugin from "./main";
 
 export type SortDirection = "asc" | "desc";
+export type CardStyle = "classic" | "glass";
 
 export interface PaperVaultSettings {
   paperRoot: string;
@@ -9,6 +10,7 @@ export interface PaperVaultSettings {
   dataDirectory: string;
   defaultSortKey: string;
   defaultSortDirection: SortDirection;
+  cardStyle: CardStyle;
   showStatusBarCount: boolean;
   openHomeOnStartup: boolean;
   debugLogging: boolean;
@@ -20,6 +22,7 @@ export const DEFAULT_SETTINGS: PaperVaultSettings = {
   dataDirectory: "",
   defaultSortKey: "year",
   defaultSortDirection: "desc",
+  cardStyle: "classic",
   showStatusBarCount: true,
   openHomeOnStartup: true,
   debugLogging: false
@@ -114,6 +117,21 @@ export class PaperVaultSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.defaultSortDirection)
           .onChange(async (value: SortDirection) => {
             this.plugin.settings.defaultSortDirection = value;
+            await this.plugin.saveSettingsOnly();
+            this.plugin.refreshViews();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("卡片风格")
+      .setDesc("控制论文库卡片模式的视觉样式。")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("classic", "经典")
+          .addOption("glass", "半透明玻璃")
+          .setValue(this.plugin.settings.cardStyle)
+          .onChange(async (value: CardStyle) => {
+            this.plugin.settings.cardStyle = value;
             await this.plugin.saveSettingsOnly();
             this.plugin.refreshViews();
           })

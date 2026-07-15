@@ -122,7 +122,7 @@ export class PaperHomeView extends ItemView {
       card.createDiv({ cls: "paper-vault-home-area-count", text: `${count} 篇` });
       card.addEventListener("click", () => {
         const filter = area === "未分类" ? {} : { areaPrimary: area };
-        void this.plugin.openListWithFilter(filter);
+        void this.plugin.openListWithFilter(filter, "cards");
       });
     }
   }
