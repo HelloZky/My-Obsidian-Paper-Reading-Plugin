@@ -33,7 +33,8 @@
 }
 
 .paper-vault-filter-row input,
-.paper-vault-filter-row select {
+.paper-vault-filter-row select,
+.paper-vault-sort-direction {
   min-width: 112px;
   max-width: 170px;
   height: 28px;

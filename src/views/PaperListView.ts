@@ -8,6 +8,7 @@ import type PaperVaultPlugin from "../main";
 const COLUMNS: Array<{ key: string; label: string }> = [
   { key: "title", label: "标题" },
   { key: "year", label: "年份" },
+  { key: "uid", label: "UID" },
   { key: "venueAbbrev", label: "期刊/会议" },
   { key: "ccf", label: "CCF" },
   { key: "jcr", label: "JCR" },
@@ -141,6 +142,7 @@ export class PaperListView extends ItemView {
     this.addYearInput(filterRow, "yearTo", "到");
     this.addSelect(filterRow, "kind", "paperKind", options.paperKind);
     this.addSelect(filterRow, "类型", "paperType", options.paperType);
+    this.addSortControls(filterRow);
 
     const reset = filterRow.createEl("button", { cls: "paper-vault-clear-button", text: "清空" });
     reset.addEventListener("click", () => {
@@ -209,6 +211,28 @@ export class PaperListView extends ItemView {
     });
   }
 
+  private addSortControls(parent: HTMLElement): void {
+    const select = parent.createEl("select", { attr: { "aria-label": "排序字段" } });
+    for (const column of COLUMNS) {
+      select.createEl("option", { text: `排序：${column.label}`, value: column.key });
+    }
+    select.value = this.sort.key;
+    select.addEventListener("change", () => {
+      this.sort.key = select.value;
+      this.renderResults();
+    });
+
+    const direction = parent.createEl("button", {
+      cls: "paper-vault-sort-direction",
+      text: this.sort.direction === "asc" ? "升序" : "降序"
+    });
+    direction.addEventListener("click", () => {
+      this.sort.direction = this.sort.direction === "asc" ? "desc" : "asc";
+      direction.setText(this.sort.direction === "asc" ? "升序" : "降序");
+      this.renderResults();
+    });
+  }
+
   private renderTable(records: PaperRecord[]): void {
     this.resultsEl.empty();
     this.resultsEl.className = "paper-vault-results paper-vault-table-wrap";
@@ -233,6 +257,7 @@ export class PaperListView extends ItemView {
       row.addEventListener("click", () => void this.openRecord(record));
       row.createEl("td", { cls: "paper-vault-title-cell", text: record.title });
       row.createEl("td", { text: record.year ? String(record.year) : "—" });
+      row.createEl("td", { text: record.uid || "—" });
       row.createEl("td", { text: record.venueAbbrev || record.venue || "—" });
       this.addBadgeCell(row, record.rankings.ccf, ccfClass(record.rankings.ccf));
       this.addBadgeCell(row, record.rankings.jcr, quartileClass(record.rankings.jcr));

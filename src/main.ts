@@ -232,6 +232,10 @@ export default class PaperVaultPlugin extends Plugin {
   }
 
   private async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const stored = (await this.loadData()) as Partial<PaperVaultSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+    if (stored?.defaultSortKey === "year" && stored?.defaultSortDirection === "desc") {
+      this.settings.defaultSortKey = DEFAULT_SETTINGS.defaultSortKey;
+    }
   }
 }

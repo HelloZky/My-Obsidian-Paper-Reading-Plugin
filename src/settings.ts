@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: PaperVaultSettings = {
   paperRoot: "论文笔记",
   dataSource: "builtin",
   dataDirectory: "",
-  defaultSortKey: "year",
+  defaultSortKey: "uid",
   defaultSortDirection: "desc",
   cardStyle: "classic",
   showStatusBarCount: true,
@@ -91,6 +91,7 @@ export class PaperVaultSettingTab extends PluginSettingTab {
       .addDropdown((dropdown) =>
         dropdown
           .addOption("year", "年份")
+          .addOption("uid", "UID")
           .addOption("title", "标题")
           .addOption("venueAbbrev", "期刊/会议")
           .addOption("ccf", "CCF")

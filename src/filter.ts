@@ -100,6 +100,8 @@ function getSortValue(record: PaperRecord, key: string): string | number {
       return casWeight(record.rankings.cas);
     case "star":
       return record.star;
+    case "uid":
+      return record.uid;
     case "areaPrimary":
       return record.areaPrimary;
     case "areaSecondary":
