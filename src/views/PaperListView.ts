@@ -1,4 +1,4 @@
-import { ItemView, TFile, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import { ccfClass, quartileClass } from "../badges";
 import { VIEW_TYPE_PAPER_LIST } from "../constants";
 import { EMPTY_FILTERS, FilterState, filterRecords, getFilterOptions, SortState, sortRecords } from "../filter";
@@ -14,12 +14,14 @@ const COLUMNS: Array<{ key: string; label: string }> = [
   { key: "jcr", label: "JCR" },
   { key: "cas", label: "中科院" },
   { key: "star", label: "star" },
+  { key: "openCount", label: "查看次数" },
+  { key: "lastOpenedAt", label: "最近查看" },
   { key: "areaPrimary", label: "大方向" },
   { key: "areaSecondary", label: "小方向" },
   { key: "paperKind", label: "kind" }
 ];
 
-export type PaperListViewMode = "table" | "cards";
+export type PaperListViewMode = "table" | "cards" | "qa";
 
 export class PaperListView extends ItemView {
   plugin: PaperVaultPlugin;
@@ -83,11 +85,16 @@ export class PaperListView extends ItemView {
 
   private updateCardStyleClass(): void {
     this.rootEl.classList.remove("paper-vault-card-style-classic", "paper-vault-card-style-glass");
+    this.rootEl.classList.remove("paper-vault-card-density-compact", "paper-vault-card-density-standard", "paper-vault-card-density-rich");
     this.rootEl.classList.add(`paper-vault-card-style-${this.plugin.settings.cardStyle}`);
+    this.rootEl.classList.add(`paper-vault-card-density-${this.plugin.settings.cardDensity}`);
   }
 
   private renderResults(records = this.plugin.indexer.getRecords()): void {
-    const filtered = sortRecords(filterRecords(records, this.filters), this.sort);
+    const filtered = sortRecords(filterRecords(records, this.filters), this.sort, {
+      getOpenCount: (record) => this.plugin.getPaperOpenCount(record),
+      getLastOpenedAt: (record) => this.plugin.getPaperLastOpenedAt(record)
+    });
     this.plugin.debugLog("view render", {
       totalRecords: records.length,
       filteredRecords: filtered.length,
@@ -105,7 +112,9 @@ export class PaperListView extends ItemView {
       }))
     });
     this.countEl.setText(`命中 ${filtered.length} / ${records.length}`);
-    if (this.viewMode === "cards") {
+    if (this.viewMode === "qa") {
+      this.renderQa(filtered);
+    } else if (this.viewMode === "cards") {
       this.renderCards(filtered);
     } else {
       this.renderTable(filtered);
@@ -130,6 +139,7 @@ export class PaperListView extends ItemView {
 
     this.countEl = primaryRow.createSpan({ cls: "paper-vault-count" });
     this.addViewModeToggle(primaryRow);
+    this.addPresetControls(primaryRow);
 
     const options = getFilterOptions(records, this.filters);
     this.addSelect(filterRow, "大方向", "areaPrimary", options.areaPrimary);
@@ -155,6 +165,7 @@ export class PaperListView extends ItemView {
     const group = parent.createDiv({ cls: "paper-vault-view-toggle" });
     this.addModeButton(group, "table", "表格");
     this.addModeButton(group, "cards", "卡片");
+    this.addModeButton(group, "qa", "QA");
   }
 
   private addModeButton(group: HTMLElement, mode: PaperListViewMode, label: string): void {
@@ -212,9 +223,9 @@ export class PaperListView extends ItemView {
   }
 
   private addSortControls(parent: HTMLElement): void {
-    const select = parent.createEl("select", { attr: { "aria-label": "排序字段" } });
+    const select = parent.createEl("select", { cls: "paper-vault-sort-select", attr: { "aria-label": "排序字段" } });
     for (const column of COLUMNS) {
-      select.createEl("option", { text: `排序：${column.label}`, value: column.key });
+      select.createEl("option", { text: column.label, value: column.key });
     }
     select.value = this.sort.key;
     select.addEventListener("change", () => {
@@ -224,13 +235,57 @@ export class PaperListView extends ItemView {
 
     const direction = parent.createEl("button", {
       cls: "paper-vault-sort-direction",
-      text: this.sort.direction === "asc" ? "升序" : "降序"
+      text: this.sort.direction === "asc" ? "↑" : "↓"
     });
+    direction.setAttr("title", this.sort.direction === "asc" ? "升序" : "降序");
     direction.addEventListener("click", () => {
       this.sort.direction = this.sort.direction === "asc" ? "desc" : "asc";
-      direction.setText(this.sort.direction === "asc" ? "升序" : "降序");
+      direction.setText(this.sort.direction === "asc" ? "↑" : "↓");
+      direction.setAttr("title", this.sort.direction === "asc" ? "升序" : "降序");
       this.renderResults();
     });
+  }
+
+  private addPresetControls(parent: HTMLElement): void {
+    const presets = this.plugin.settings.filterPresets;
+    const select = parent.createEl("select", { cls: "paper-vault-preset-select", attr: { "aria-label": "筛选预设" } });
+    select.createEl("option", { text: "预设", value: "" });
+    for (const preset of presets) {
+      select.createEl("option", { text: preset.name, value: preset.name });
+    }
+    select.addEventListener("change", () => {
+      const preset = presets.find((item) => item.name === select.value);
+      if (!preset) return;
+      this.filters = { ...EMPTY_FILTERS, ...(preset.filters as Partial<FilterState>) };
+      this.sort = { key: preset.sortKey, direction: preset.sortDirection };
+      this.render();
+    });
+
+    const nameInput = parent.createEl("input", {
+      cls: "paper-vault-preset-name",
+      attr: { type: "text", placeholder: "预设名称" }
+    });
+    const save = parent.createEl("button", { cls: "paper-vault-preset-save", text: "保存预设" });
+    save.addEventListener("click", () => void this.saveCurrentPreset(nameInput.value));
+  }
+
+  private async saveCurrentPreset(name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      new Notice("请先填写预设名称");
+      return;
+    }
+    const next = this.plugin.settings.filterPresets.filter((preset) => preset.name !== trimmed);
+    next.push({
+      name: trimmed,
+      filters: { ...this.filters },
+      sortKey: this.sort.key,
+      sortDirection: this.sort.direction
+    });
+    this.plugin.settings.filterPresets = next;
+    await this.plugin.saveSettingsOnly();
+    new Notice(`已保存预设：${trimmed}`);
+    this.render();
   }
 
   private renderTable(records: PaperRecord[]): void {
@@ -263,6 +318,8 @@ export class PaperListView extends ItemView {
       this.addBadgeCell(row, record.rankings.jcr, quartileClass(record.rankings.jcr));
       this.addBadgeCell(row, record.rankings.cas, quartileClass(record.rankings.cas));
       row.createEl("td", { text: record.star ? "⭐".repeat(record.star) : "—" });
+      row.createEl("td", { text: String(this.plugin.getPaperOpenCount(record)) });
+      row.createEl("td", { text: formatRelativeTime(this.plugin.getPaperLastOpenedAt(record)) });
       row.createEl("td", { text: record.areaPrimary || "—" });
       row.createEl("td", { text: record.areaSecondary || "—" });
       row.createEl("td", { text: record.paperKind ?? "—" });
@@ -303,17 +360,77 @@ export class PaperListView extends ItemView {
       }
 
       const badges = body.createDiv({ cls: "paper-vault-card-badges" });
-      this.renderCardRankingBadges(badges, record);
+      const badgeList = badges.createDiv({ cls: "paper-vault-card-badge-list" });
+      this.renderCardRankingBadges(badgeList, record);
+      badges.createSpan({
+        cls: "paper-vault-card-rating",
+        text: record.star ? "⭐".repeat(record.star) : "未评级"
+      });
 
       const footer = body.createDiv({ cls: "paper-vault-card-footer" });
       footer.createSpan({
         cls: "paper-vault-card-direction",
-        text: [record.areaPrimary, record.areaSecondary].filter(Boolean).join(" / ") || "未分类"
+        text: this.cardContextLabel(record)
       });
-      footer.createSpan({ cls: "paper-vault-card-star", text: record.star ? "⭐".repeat(record.star) : "未评级" });
+      const metrics = footer.createSpan({ cls: "paper-vault-card-metrics" });
+      metrics.createSpan({ cls: "paper-vault-card-open-count", text: `查看 ${this.plugin.getPaperOpenCount(record)} 次` });
+      metrics.createSpan({ cls: "paper-vault-card-last-opened", text: formatRelativeTime(this.plugin.getPaperLastOpenedAt(record)) });
 
-      card.addEventListener("click", () => void this.openRecord(record));
+      card.addEventListener("click", () => void this.openRecordFromCard(record));
     }
+  }
+
+  private renderQa(records: PaperRecord[]): void {
+    this.resultsEl.empty();
+    this.resultsEl.className = "paper-vault-results paper-vault-qa-wrap";
+    const items = this.collectQaItems(records);
+    if (!items.length) {
+      this.resultsEl.createDiv({ cls: "paper-vault-empty", text: "当前筛选范围内没有发现 QA 问题。" });
+      return;
+    }
+
+    const list = this.resultsEl.createDiv({ cls: "paper-vault-qa-list" });
+    for (const itemData of items) {
+      const item = list.createEl("button", { cls: "paper-vault-qa-item" });
+      item.createDiv({ cls: "paper-vault-qa-title", text: itemData.record.title });
+      item.createDiv({ cls: "paper-vault-qa-meta", text: [itemData.record.areaPrimary, itemData.record.areaSecondary].filter(Boolean).join(" / ") || "未分类" });
+      const problems = item.createDiv({ cls: "paper-vault-qa-problems" });
+      for (const message of itemData.messages) {
+        problems.createSpan({ cls: "paper-vault-qa-problem", text: message });
+      }
+      item.addEventListener("click", () => void this.openRecord(itemData.record));
+    }
+  }
+
+  private collectQaItems(records: PaperRecord[]): Array<{ record: PaperRecord; messages: string[] }> {
+    const citekeyCounts = new Map<string, number>();
+    for (const record of records) {
+      if (record.citekey) citekeyCounts.set(record.citekey, (citekeyCounts.get(record.citekey) ?? 0) + 1);
+    }
+
+    const items: Array<{ record: PaperRecord; messages: string[] }> = [];
+    for (const record of records) {
+      const messages: string[] = [];
+      const missingFields = [
+        !record.desc ? "desc" : "",
+        !record.venue && !record.venueAbbrev ? "venue" : "",
+        !record.paperKind ? "paper-kind" : "",
+        !record.star ? "star" : ""
+      ].filter(Boolean);
+      if (missingFields.length) messages.push(`缺字段：${missingFields.join("、")}`);
+      if (!record.rankings.ccf && !record.rankings.jcr && !record.rankings.cas) {
+        messages.push("venue 三库均未匹配");
+      }
+      if (!record.bannerExists) messages.push("缺 banner 图片");
+      if (!record.slidesExist) messages.push("缺 slides 文件");
+      const missingSubNotes = ["简报", "方法介绍", "实验结果", "审阅建议", "后续灵感"].filter((key) => !record.subNotes[key]);
+      if (missingSubNotes.length) messages.push(`缺子笔记：${missingSubNotes.join("、")}`);
+      if (record.citekey && (citekeyCounts.get(record.citekey) ?? 0) > 1) {
+        messages.push(`citekey 重复：${record.citekey}`);
+      }
+      if (messages.length) items.push({ record, messages });
+    }
+    return items;
   }
 
   private addBadgeCell(row: HTMLTableRowElement, value: string, cls: string): void {
@@ -352,8 +469,18 @@ export class PaperListView extends ItemView {
     }
 
     if (missing.length) {
-      this.addCardBadge(parent, `${missing.join("/")}未收录`, "");
+      this.addCardBadge(parent, missing.join("/"), "paper-vault-badge-struck");
     }
+  }
+
+  private cardContextLabel(record: PaperRecord): string {
+    if (this.filters.areaPrimary && this.filters.areaSecondary) {
+      return formatPaperType(record.paperType) || formatPaperKind(record.paperKind) || "已筛选方向";
+    }
+    if (this.filters.areaPrimary) {
+      return record.areaSecondary || formatPaperType(record.paperType) || formatPaperKind(record.paperKind) || "未细分方向";
+    }
+    return [record.areaPrimary, record.areaSecondary].filter(Boolean).join(" / ") || "未分类";
   }
 
   private bannerSrc(record: PaperRecord): string | null {
@@ -384,6 +511,11 @@ export class PaperListView extends ItemView {
     }
   }
 
+  private async openRecordFromCard(record: PaperRecord): Promise<void> {
+    await this.plugin.incrementPaperOpenCount(record);
+    await this.openRecord(record);
+  }
+
   private renderDebugInfo(parent: HTMLElement): void {
     if (!this.plugin.settings.debugLogging) return;
 
@@ -406,5 +538,47 @@ export class PaperListView extends ItemView {
 
     const button = details.createEl("button", { text: "输出到 Console" });
     button.addEventListener("click", () => this.plugin.dumpDebugInfo());
+  }
+}
+
+function formatRelativeTime(ms: number): string {
+  if (!ms) return "未查看";
+  const diff = Date.now() - ms;
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diff < minute) return "刚刚";
+  if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`;
+  if (diff < day) return `${Math.floor(diff / hour)} 小时前`;
+  if (diff < 30 * day) return `${Math.floor(diff / day)} 天前`;
+  const date = new Date(ms);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatPaperType(value: string | null): string {
+  switch (value) {
+    case "journalArticle":
+    case "reviewArticle":
+      return "期刊";
+    case "conferencePaper":
+      return "会议";
+    case "preprint":
+      return "预印本";
+    default:
+      return value ?? "";
+  }
+}
+
+function formatPaperKind(value: string | null): string {
+  switch (value) {
+    case "survey":
+      return "综述";
+    case "regular":
+      return "常规论文";
+    case "ambiguous":
+      return "类型待定";
+    default:
+      return value ?? "";
   }
 }

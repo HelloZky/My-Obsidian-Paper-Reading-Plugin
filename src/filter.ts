@@ -20,6 +20,11 @@ export interface SortState {
   direction: SortDirection;
 }
 
+export interface SortRuntime {
+  getOpenCount?: (record: PaperRecord) => number;
+  getLastOpenedAt?: (record: PaperRecord) => number;
+}
+
 export const EMPTY_FILTERS: FilterState = {
   query: "",
   areaPrimary: "",
@@ -55,9 +60,9 @@ export function filterRecords(records: PaperRecord[], filters: FilterState): Pap
   });
 }
 
-export function sortRecords(records: PaperRecord[], sort: SortState): PaperRecord[] {
+export function sortRecords(records: PaperRecord[], sort: SortState, runtime: SortRuntime = {}): PaperRecord[] {
   const direction = sort.direction === "asc" ? 1 : -1;
-  return [...records].sort((a, b) => compareValue(getSortValue(a, sort.key), getSortValue(b, sort.key)) * direction);
+  return [...records].sort((a, b) => compareValue(getSortValue(a, sort.key, runtime), getSortValue(b, sort.key, runtime)) * direction);
 }
 
 export function getFilterOptions(records: PaperRecord[], filters: FilterState): Record<string, string[]> {
@@ -86,7 +91,7 @@ function matchesQuery(record: PaperRecord, query: string): boolean {
     .includes(query);
 }
 
-function getSortValue(record: PaperRecord, key: string): string | number {
+function getSortValue(record: PaperRecord, key: string, runtime: SortRuntime): string | number {
   switch (key) {
     case "year":
       return record.year ?? 0;
@@ -102,6 +107,10 @@ function getSortValue(record: PaperRecord, key: string): string | number {
       return record.star;
     case "uid":
       return record.uid;
+    case "openCount":
+      return runtime.getOpenCount?.(record) ?? 0;
+    case "lastOpenedAt":
+      return runtime.getLastOpenedAt?.(record) ?? 0;
     case "areaPrimary":
       return record.areaPrimary;
     case "areaSecondary":

@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, MarkdownView, TFile, WorkspaceLeaf } from "obsidian";
+import { HeadingCache, ItemView, MarkdownView, TFile, WorkspaceLeaf } from "obsidian";
 import { ccfClass, quartileClass } from "../badges";
 import { VIEW_TYPE_PAPER_DETAIL } from "../constants";
 import { PaperRecord } from "../indexer";
@@ -23,8 +23,6 @@ export class PaperDetailView extends ItemView {
   plugin: PaperVaultPlugin;
 
   private bodyEl!: HTMLElement;
-  private selectedNotePath: string | null = null;
-  private noteContentRenderId = 0;
 
   constructor(leaf: WorkspaceLeaf, plugin: PaperVaultPlugin) {
     super(leaf);
@@ -85,11 +83,13 @@ export class PaperDetailView extends ItemView {
     }
 
     this.renderHeader(record, file);
+    this.renderActions(record);
     this.renderMeta(record);
     this.renderRankings(record);
     this.renderAuthors(record);
     this.renderLinks(record);
-    this.renderNoteTabs(record, file);
+    this.renderNoteNavigation(record);
+    this.renderOutline(file);
   }
 
   private renderPlaceholder(text: string): void {
@@ -116,6 +116,30 @@ export class PaperDetailView extends ItemView {
         cls: "paper-vault-detail-current",
         text: `当前查看：${suffix}`
       });
+    }
+  }
+
+  private renderActions(record: PaperRecord): void {
+    const actions = this.bodyEl.createDiv({ cls: "paper-vault-detail-actions" });
+    const openMain = actions.createEl("button", { text: "打开主笔记" });
+    openMain.addEventListener("click", () => void this.openMainNote(record));
+
+    if (record.zoteroUrl) {
+      const zotero = actions.createEl("a", {
+        cls: "paper-vault-detail-action-link",
+        text: "Zotero",
+        href: record.zoteroUrl
+      });
+      zotero.setAttr("target", "_blank");
+    }
+
+    if (record.bannerExists && record.bannerPath) {
+      const banner = actions.createEl("button", { text: "打开图片" });
+      banner.addEventListener("click", () => void this.openPath(record.bannerPath as string));
+    }
+
+    if (record.slidesExist) {
+      actions.createSpan({ cls: "paper-vault-detail-action-note", text: "含 slides" });
     }
   }
 
@@ -204,37 +228,23 @@ export class PaperDetailView extends ItemView {
     link.setAttr("target", "_blank");
   }
 
-  private renderNoteTabs(record: PaperRecord, currentFile: TFile): void {
+  private renderNoteNavigation(record: PaperRecord): void {
     const entries = this.getNoteTabEntries(record);
-    const activePath = this.resolveActiveNotePath(entries, currentFile);
 
-    const section = this.createSection("笔记内容");
+    const section = this.createSection("笔记跳转");
     const tabs = section.createDiv({ cls: "paper-vault-detail-tabs" });
-    const content = section.createDiv({ cls: "paper-vault-detail-markdown markdown-rendered" });
-    const buttons: Array<{ entry: NoteTabEntry; button: HTMLButtonElement }> = [];
-
-    const selectEntry = (entry: NoteTabEntry) => {
-      this.selectedNotePath = entry.path;
-      for (const item of buttons) {
-        item.button.classList.toggle("is-active", item.entry.path === entry.path);
-      }
-      void this.renderNoteContent(entry.path, content);
-    };
 
     for (const entry of entries) {
       const button = tabs.createEl("button", {
         cls: "paper-vault-detail-tab",
         text: entry.label
       });
-      buttons.push({ entry, button });
-      button.addEventListener("click", () => selectEntry(entry));
+      button.addEventListener("click", () => void this.openPath(entry.path));
     }
 
     if (record.slidesExist) {
       tabs.createSpan({ cls: "paper-vault-detail-tag", text: "含 slides" });
     }
-
-    selectEntry(entries.find((entry) => entry.path === activePath) ?? entries[0]);
   }
 
   private getNoteTabEntries(record: PaperRecord): NoteTabEntry[] {
@@ -247,33 +257,23 @@ export class PaperDetailView extends ItemView {
     ];
   }
 
-  private resolveActiveNotePath(entries: NoteTabEntry[], currentFile: TFile): string {
-    if (entries.some((entry) => entry.path === currentFile.path)) return currentFile.path;
-    if (this.selectedNotePath && entries.some((entry) => entry.path === this.selectedNotePath)) {
-      return this.selectedNotePath;
-    }
-    return entries[0].path;
-  }
-
-  private async renderNoteContent(path: string, parent: HTMLElement): Promise<void> {
-    const renderId = ++this.noteContentRenderId;
-    parent.empty();
-
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) {
-      parent.createDiv({ cls: "paper-vault-detail-empty", text: "这份笔记不存在或已经移动。" });
+  private renderOutline(file: TFile): void {
+    const headings = this.app.metadataCache.getFileCache(file)?.headings ?? [];
+    const section = this.createSection("当前笔记目录");
+    if (!headings.length) {
+      section.createDiv({ cls: "paper-vault-detail-empty", text: "当前笔记没有标题。" });
       return;
     }
 
-    try {
-      const content = await this.app.vault.cachedRead(file);
-      if (renderId !== this.noteContentRenderId) return;
-      await MarkdownRenderer.render(this.app, stripFrontmatter(content), parent, file.path, this);
-    } catch (error) {
-      console.error(`Paper Vault: failed to render ${path}`, error);
-      if (renderId === this.noteContentRenderId) {
-        parent.createDiv({ cls: "paper-vault-detail-empty", text: "渲染这份笔记时出错。" });
-      }
+    const minLevel = Math.min(...headings.map((heading) => heading.level));
+    const list = section.createDiv({ cls: "paper-vault-detail-outline" });
+    for (const heading of headings) {
+      const indent = Math.min(heading.level - minLevel, 5);
+      const item = list.createEl("button", {
+        cls: `paper-vault-detail-heading paper-vault-detail-heading-l${indent}`,
+        text: heading.heading
+      });
+      item.addEventListener("click", () => void this.jumpToHeading(file, heading));
     }
   }
 
@@ -295,14 +295,18 @@ export class PaperDetailView extends ItemView {
     }
   }
 
+  private async jumpToHeading(file: TFile, heading: HeadingCache): Promise<void> {
+    const leaf = this.findLeafForFile(file) ?? this.app.workspace.getLeaf(false);
+    await leaf.openFile(file, {
+      active: true,
+      eState: { line: heading.position.start.line }
+    });
+  }
+
   private findLeafForFile(file: TFile): WorkspaceLeaf | null {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       if ((leaf.view as MarkdownView).file === file) return leaf;
     }
     return null;
   }
-}
-
-function stripFrontmatter(content: string): string {
-  return content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
 }

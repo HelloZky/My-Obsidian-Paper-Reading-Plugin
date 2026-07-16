@@ -3,6 +3,19 @@ import type PaperVaultPlugin from "./main";
 
 export type SortDirection = "asc" | "desc";
 export type CardStyle = "classic" | "glass";
+export type CardDensity = "compact" | "standard" | "rich";
+
+export interface PaperOpenStat {
+  count: number;
+  lastOpenedAt: number;
+}
+
+export interface FilterPreset {
+  name: string;
+  filters: Record<string, unknown>;
+  sortKey: string;
+  sortDirection: SortDirection;
+}
 
 export interface PaperVaultSettings {
   paperRoot: string;
@@ -11,6 +24,9 @@ export interface PaperVaultSettings {
   defaultSortKey: string;
   defaultSortDirection: SortDirection;
   cardStyle: CardStyle;
+  cardDensity: CardDensity;
+  paperOpenStats: Record<string, PaperOpenStat>;
+  filterPresets: FilterPreset[];
   showStatusBarCount: boolean;
   openHomeOnStartup: boolean;
   debugLogging: boolean;
@@ -23,6 +39,9 @@ export const DEFAULT_SETTINGS: PaperVaultSettings = {
   defaultSortKey: "uid",
   defaultSortDirection: "desc",
   cardStyle: "classic",
+  cardDensity: "standard",
+  paperOpenStats: {},
+  filterPresets: [],
   showStatusBarCount: true,
   openHomeOnStartup: true,
   debugLogging: false
@@ -98,6 +117,8 @@ export class PaperVaultSettingTab extends PluginSettingTab {
           .addOption("jcr", "JCR")
           .addOption("cas", "中科院")
           .addOption("star", "星级")
+          .addOption("openCount", "查看次数")
+          .addOption("lastOpenedAt", "最近查看")
           .addOption("areaPrimary", "大方向")
           .addOption("areaSecondary", "小方向")
           .addOption("paperKind", "kind")
@@ -133,6 +154,22 @@ export class PaperVaultSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.cardStyle)
           .onChange(async (value: CardStyle) => {
             this.plugin.settings.cardStyle = value;
+            await this.plugin.saveSettingsOnly();
+            this.plugin.refreshViews();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("卡片密度")
+      .setDesc("控制卡片模式的信息密度。")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("compact", "紧凑")
+          .addOption("standard", "标准")
+          .addOption("rich", "信息丰富")
+          .setValue(this.plugin.settings.cardDensity)
+          .onChange(async (value: CardDensity) => {
+            this.plugin.settings.cardDensity = value;
             await this.plugin.saveSettingsOnly();
             this.plugin.refreshViews();
           })

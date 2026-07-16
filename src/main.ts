@@ -1,9 +1,9 @@
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { VIEW_TYPE_PAPER_DETAIL, VIEW_TYPE_PAPER_HOME, VIEW_TYPE_PAPER_LIST } from "./constants";
 import { FilterState } from "./filter";
-import { PaperIndexer } from "./indexer";
+import { PaperIndexer, PaperRecord } from "./indexer";
 import { RankingService } from "./rankings";
-import { DEFAULT_SETTINGS, PaperVaultSettings, PaperVaultSettingTab } from "./settings";
+import { DEFAULT_SETTINGS, PaperOpenStat, PaperVaultSettings, PaperVaultSettingTab } from "./settings";
 import { PaperDetailView } from "./views/PaperDetailView";
 import { PaperHomeView } from "./views/PaperHomeView";
 import { PaperListView, PaperListViewMode } from "./views/PaperListView";
@@ -231,9 +231,49 @@ export default class PaperVaultPlugin extends Plugin {
     await this.indexer?.rebuild();
   }
 
+  getPaperOpenCount(record: PaperRecord): number {
+    return this.getPaperOpenStat(record).count;
+  }
+
+  getPaperLastOpenedAt(record: PaperRecord): number {
+    return this.getPaperOpenStat(record).lastOpenedAt;
+  }
+
+  getPaperOpenStat(record: PaperRecord): PaperOpenStat {
+    return this.settings.paperOpenStats[this.getPaperCountKey(record)] ?? { count: 0, lastOpenedAt: 0 };
+  }
+
+  async incrementPaperOpenCount(record: PaperRecord): Promise<number> {
+    const key = this.getPaperCountKey(record);
+    const current = this.settings.paperOpenStats[key] ?? { count: 0, lastOpenedAt: 0 };
+    const next = current.count + 1;
+    this.settings.paperOpenStats[key] = {
+      count: next,
+      lastOpenedAt: Date.now()
+    };
+    await this.saveSettingsOnly();
+    this.refreshViews();
+    return next;
+  }
+
+  private getPaperCountKey(record: PaperRecord): string {
+    return record.uid || record.path;
+  }
+
   private async loadSettings(): Promise<void> {
-    const stored = (await this.loadData()) as Partial<PaperVaultSettings> | null;
+    type LegacySettings = Partial<PaperVaultSettings> & { paperOpenCounts?: Record<string, number> };
+    const stored = (await this.loadData()) as LegacySettings | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+    this.settings.paperOpenStats = this.settings.paperOpenStats ?? {};
+    if (stored?.paperOpenCounts) {
+      for (const [key, count] of Object.entries(stored.paperOpenCounts)) {
+        if (!this.settings.paperOpenStats[key]) {
+          this.settings.paperOpenStats[key] = { count, lastOpenedAt: 0 };
+        }
+      }
+      delete (this.settings as PaperVaultSettings & { paperOpenCounts?: Record<string, number> }).paperOpenCounts;
+    }
+    this.settings.filterPresets = this.settings.filterPresets ?? [];
     if (stored?.defaultSortKey === "year" && stored?.defaultSortDirection === "desc") {
       this.settings.defaultSortKey = DEFAULT_SETTINGS.defaultSortKey;
     }
